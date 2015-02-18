@@ -1,2 +1,3 @@
 *.log
 node_modules
+/.ntvs_analysis.dat
