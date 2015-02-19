@@ -61,7 +61,7 @@ Many node modules already rely on HTTP Signature, so this module is installed by
   ...
   "dependencies": {
     ...
-    "http-signature": "VacationRoost/node-http-signature",
+    "http-signature": "LeisureLink/node-http-signature",
     ...
   }
 }
@@ -73,4 +73,4 @@ MIT.
 
 ## Bugs
 
-See <https://github.com/VacationRoost/node-http-signature/issues>.
+See <https://github.com/LeisureLink/node-http-signature/issues>.
