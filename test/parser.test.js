@@ -311,6 +311,42 @@ test('valid default headers', function(t) {
 });
 
 
+test('valid jwt signature', function(t) {
+  server.tester = function(req, res) {
+    try {
+      var parsed = httpSignature.parseRequest(req);
+      res.writeHead(200);
+      res.write(JSON.stringify(parsed, null, 2));
+      res.end();
+    } catch (e) {
+      t.fail(e.stack);
+    }
+  };
+
+  options.headers.Authorization =
+    'Signature keyId="foo",algorithm="rsa-sha256",jwt="some-token",signature="aaabbbbcccc"';
+  options.headers.Date = jsprim.rfc1123(new Date());
+  http.get(options, function(res) {
+    t.equal(res.statusCode, 200);
+
+    var body = '';
+    res.setEncoding('utf8');
+    res.on('data', function(chunk) {
+      body += chunk;
+    });
+
+    res.on('end', function() {
+      var parsed = JSON.parse(body);
+      t.ok(parsed);
+      t.equal(parsed.scheme, 'Signature');
+      t.ok(parsed.params);
+      t.equal(parsed.params.jwt, 'some-token');
+      t.end();
+    });
+  });
+});
+
+
 test('explicit headers missing', function(t) {
   server.tester = function(req, res) {
     try {
