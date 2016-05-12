@@ -3,9 +3,11 @@
 var crypto = require('crypto');
 var fs = require('fs');
 var http = require('http');
+var jsprim = require('jsprim');
+var sshpk = require('sshpk');
 
 var test = require('tap').test;
-var uuid = require('node-uuid');
+var uuid = require('uuid');
 
 var httpSignature = require('../lib/index');
 
@@ -17,56 +19,30 @@ var hmacKey = null;
 var options = null;
 var rsaPrivate = null;
 var rsaPublic = null;
+var dsaPrivate = null;
+var dsaPublic = null;
+var ecdsaPrivate = null;
+var ecdsaPublic = null;
 var server = null;
 var socket = null;
-
-
-
-// --- Helpers
-
-function _pad(val) {
-  if (parseInt(val, 10) < 10) {
-    val = '0' + val;
-  }
-  return val;
-}
-
-
-function _rfc1123(date) {
-  if (!date) date = new Date();
-
-  var months = ['Jan',
-                'Feb',
-                'Mar',
-                'Apr',
-                'May',
-                'Jun',
-                'Jul',
-                'Aug',
-                'Sep',
-                'Oct',
-                'Nov',
-                'Dec'];
-  var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  return days[date.getUTCDay()] + ', ' +
-    _pad(date.getUTCDate()) + ' ' +
-    months[date.getUTCMonth()] + ' ' +
-    date.getUTCFullYear() + ' ' +
-    _pad(date.getUTCHours()) + ':' +
-    _pad(date.getUTCMinutes()) + ':' +
-    _pad(date.getUTCSeconds()) +
-    ' GMT';
-}
-
 
 
 ///--- Tests
 
 test('setup', function(t) {
   rsaPrivate = fs.readFileSync(__dirname + '/rsa_private.pem', 'ascii');
-  rsaPublic = fs.readFileSync(__dirname + '/rsa_public.pem', 'ascii');
+  dsaPrivate = fs.readFileSync(__dirname + '/dsa_private.pem', 'ascii');
+  ecdsaPrivate = fs.readFileSync(__dirname + '/ecdsa_private.pem', 'ascii');
   t.ok(rsaPrivate);
+  t.ok(dsaPrivate);
+  t.ok(ecdsaPrivate);
+
+  rsaPublic = fs.readFileSync(__dirname + '/rsa_public.pem', 'ascii');
+  dsaPublic = fs.readFileSync(__dirname + '/dsa_public.pem', 'ascii');
+  ecdsaPublic = fs.readFileSync(__dirname + '/ecdsa_public.pem', 'ascii');
   t.ok(rsaPublic);
+  t.ok(dsaPublic);
+  t.ok(ecdsaPublic);
 
   hmacKey = uuid();
   socket = '/tmp/.' + uuid();
@@ -96,7 +72,7 @@ test('invalid hmac', function(t) {
     res.end();
   };
 
-  options.headers.Date = _rfc1123();
+  options.headers.Date = jsprim.rfc1123(new Date());
   options.headers.Authorization =
     'Signature keyId="foo",algorithm="hmac-sha1",signature="' +
      uuid() + '"';
@@ -118,7 +94,7 @@ test('valid hmac', function(t) {
     res.end();
   };
 
-  options.headers.Date = _rfc1123();
+  options.headers.Date = jsprim.rfc1123(new Date());
   var hmac = crypto.createHmac('sha1', hmacKey);
   hmac.update('date: ' + options.headers.Date);
   options.headers.Authorization =
@@ -142,7 +118,7 @@ test('invalid rsa', function(t) {
     res.end();
   };
 
-  options.headers.Date = _rfc1123();
+  options.headers.Date = jsprim.rfc1123(new Date());
   options.headers.Authorization =
     'Signature keyId="foo",algorithm="rsa-sha1",signature="' +
     uuid() + '"';
@@ -164,12 +140,104 @@ test('valid rsa', function(t) {
     res.end();
   };
 
-  options.headers.Date = _rfc1123();
+  options.headers.Date = jsprim.rfc1123(new Date());
   var signer = crypto.createSign('RSA-SHA256');
   signer.update('date: ' + options.headers.Date);
   options.headers.Authorization =
     'Signature keyId="foo",algorithm="rsa-sha256",signature="' +
     signer.sign(rsaPrivate, 'base64') + '"';
+
+  http.get(options, function(res) {
+    t.equal(res.statusCode, 200);
+    t.end();
+  });
+});
+
+test('invalid dsa', function(t) {
+  server.tester = function(req, res) {
+    var parsed = httpSignature.parseRequest(req);
+    t.ok(!httpSignature.verify(parsed, dsaPublic));
+
+    res.writeHead(200);
+    res.write(JSON.stringify(parsed, null, 2));
+    res.end();
+  };
+
+  options.headers.Date = jsprim.rfc1123(new Date());
+  options.headers.Authorization =
+    'Signature keyId="foo",algorithm="dsa-sha1",signature="' +
+    uuid() + '"';
+
+  http.get(options, function(res) {
+    t.equal(res.statusCode, 200);
+    t.end();
+  });
+});
+
+
+test('valid dsa', function(t) {
+  server.tester = function(req, res) {
+    var parsed = httpSignature.parseRequest(req);
+    t.ok(httpSignature.verify(parsed, dsaPublic));
+
+    res.writeHead(200);
+    res.write(JSON.stringify(parsed, null, 2));
+    res.end();
+  };
+
+  options.headers.Date = jsprim.rfc1123(new Date());
+  var key = sshpk.parsePrivateKey(dsaPrivate);
+  var signer = key.createSign('sha256');
+  signer.update('date: ' + options.headers.Date);
+  options.headers.Authorization =
+    'Signature keyId="foo",algorithm="dsa-sha256",signature="' +
+    signer.sign().toString() + '"';
+
+  http.get(options, function(res) {
+    t.equal(res.statusCode, 200);
+    t.end();
+  });
+});
+
+test('invalid ecdsa', function(t) {
+  server.tester = function(req, res) {
+    var parsed = httpSignature.parseRequest(req);
+    t.ok(!httpSignature.verify(parsed, ecdsaPublic));
+
+    res.writeHead(200);
+    res.write(JSON.stringify(parsed, null, 2));
+    res.end();
+  };
+
+  options.headers.Date = jsprim.rfc1123(new Date());
+  options.headers.Authorization =
+    'Signature keyId="foo",algorithm="ecdsa-sha256",signature="' +
+    uuid() + '"';
+
+  http.get(options, function(res) {
+    t.equal(res.statusCode, 200);
+    t.end();
+  });
+});
+
+
+test('valid ecdsa', function(t) {
+  server.tester = function(req, res) {
+    var parsed = httpSignature.parseRequest(req);
+    t.ok(httpSignature.verify(parsed, ecdsaPublic));
+
+    res.writeHead(200);
+    res.write(JSON.stringify(parsed, null, 2));
+    res.end();
+  };
+
+  options.headers.Date = jsprim.rfc1123(new Date());
+  var key = sshpk.parsePrivateKey(ecdsaPrivate);
+  var signer = key.createSign('sha512');
+  signer.update('date: ' + options.headers.Date);
+  options.headers.Authorization =
+    'Signature keyId="foo",algorithm="ecdsa-sha512",signature="' +
+    signer.sign().toString() + '"';
 
   http.get(options, function(res) {
     t.equal(res.statusCode, 200);
@@ -210,7 +278,6 @@ test('invalid date', function(t) {
 // test values from spec for simple test
 test('valid rsa from spec default', function(t) {
   server.tester = function(req, res) {
-    console.log('> [SIMPLE]', req.headers.authorization);
     var parsed = httpSignature.parseRequest(req, {
       // this test uses a fixed old date so ignore clock skew
       clockSkew: Number.MAX_VALUE
@@ -245,15 +312,18 @@ test('valid rsa from spec default', function(t) {
 
 // test values from spec for defaults
 test('valid rsa from spec default', function(t) {
+  var jsonMessage = '{"hello": "world"}';
+  var sha256sum = crypto.createHash('sha256');
+  sha256sum.update(jsonMessage)
+
   server.tester = function(req, res) {
-    console.log('> [DEFAULT]', req.headers.authorization);
     var parsed = httpSignature.parseRequest(req, {
       // this test uses a fixed old date so ignore clock skew
       clockSkew: Number.MAX_VALUE
     });
     t.ok(httpSignature.verify(parsed, rsaPublic));
     // check known signature
-    t.ok(req.headers.authorization === 'Signature keyId="Test",algorithm="rsa-sha256",signature="ATp0r26dbMIxOopqw0OfABDT7CKMIoENumuruOtarj8n/97Q3htHFYpH8yOSQk3Z5zh8UxUym6FYTb5+A0Nz3NRsXJibnYi7brE/4tx5But9kkFGzG+xpUmimN4c3TMN7OFH//+r8hBf7BT9/GmHDUVZT2JzWGLZES2xDOUuMtA="');
+    t.ok(req.headers.authorization === 'Signature keyId="Test",algorithm="rsa-sha256",signature="jKyvPcxB4JbmYY4mByyBY7cZfNl4OW9HpFQlG7N4YcJPteKTu4MWCLyk+gIr0wDgqtLWf9NLpMAMimdfsH7FSWGfbMFSrsVTHNTk0rK3usrfFnti1dxsM4jl0kYJCKTGI/UWkqiaxwNiKqGcdlEDrTcUhhsFsOIo8VhddmZTZ8w="');
 
     res.writeHead(200);
     res.write(JSON.stringify(parsed, null, 2));
@@ -263,10 +333,10 @@ test('valid rsa from spec default', function(t) {
   options.method = 'POST';
   options.path = '/foo?param=value&pet=dog';
   options.headers.host = 'example.com';
-  options.headers.Date = 'Thu, 05 Jan 2012 21:31:40 GMT';
+  options.headers.Date = 'Thu, 05 Jan 2014 21:31:40 GMT';
   options.headers['content-type'] = 'application/json';
-  options.headers['content-md5'] = 'Sd/dVLAcvNLSq16eXua5uQ==';
-  options.headers['content-length'] = '18';
+  options.headers['digest'] = 'SHA-256=' + sha256sum.digest('base64');
+  options.headers['content-length'] = '' + (jsonMessage.length - 1);
   var signer = crypto.createSign('RSA-SHA256');
   signer.update('date: ' + options.headers.Date);
   options.headers.Authorization =
@@ -277,21 +347,24 @@ test('valid rsa from spec default', function(t) {
     t.equal(res.statusCode, 200);
     t.end();
   });
-  req.write('{"hello": "world"}');
+  req.write(jsonMessage);
   req.end();
 });
 
 // test values from spec for all headers
 test('valid rsa from spec all headers', function(t) {
+  var jsonMessage = '{"hello": "world"}';
+  var sha256sum = crypto.createHash('sha256');
+  sha256sum.update(jsonMessage)
+
   server.tester = function(req, res) {
-    console.log('> [ALL]', req.headers.authorization);
     var parsed = httpSignature.parseRequest(req, {
       // this test uses a fixed old date so ignore clock skew
       clockSkew: Number.MAX_VALUE
     });
     t.ok(httpSignature.verify(parsed, rsaPublic));
     // check known signature
-    t.ok(req.headers.authorization === 'Signature keyId="Test",algorithm="rsa-sha256",headers="request-line host date content-type content-md5 content-length",signature="H/AaTDkJvLELy4i1RujnKlS6dm8QWiJvEpn9cKRMi49kKF+mohZ15z1r+mF+XiKS5kOOscyS83olfBtsVhYjPg2Ei3/D9D4Mvb7bFm9IaLJgYTFFuQCghrKQQFPiqJN320emjHxFowpIm1BkstnEU7lktH/XdXVBo8a6Uteiztw="');
+    t.ok(req.headers.authorization === 'Signature keyId="Test",algorithm="rsa-sha256",headers="request-line host date content-type digest content-length",signature="jgSqYK0yKclIHfF9zdApVEbDp5eqj8C4i4X76pE+XHoxugXv7qnVrGR+30bmBgtpR39I4utq17s9ghz/2QFVxlnToYAvbSVZJ9ulLd1HQBugO0jOyn9sXOtcN7uNHBjqNCqUsnt0sw/cJA6B6nJZpyNqNyAXKdxZZItOuhIs78w="');
 
     res.writeHead(200);
     res.write(JSON.stringify(parsed, null, 2));
@@ -301,27 +374,77 @@ test('valid rsa from spec all headers', function(t) {
   options.method = 'POST';
   options.path = '/foo?param=value&pet=dog';
   options.headers.host = 'example.com';
-  options.headers.Date = 'Thu, 05 Jan 2012 21:31:40 GMT';
+  options.headers.Date = 'Thu, 05 Jan 2014 21:31:40 GMT';
   options.headers['content-type'] = 'application/json';
-  options.headers['content-md5'] = 'Sd/dVLAcvNLSq16eXua5uQ==';
-  options.headers['content-length'] = '18';
+  options.headers['digest'] = 'SHA-256=' + sha256sum.digest('base64');
+  options.headers['content-length'] = '' + (jsonMessage.length - 1);
   var signer = crypto.createSign('RSA-SHA256');
   signer.update(options.method + ' ' + options.path + ' HTTP/1.1\n');
   signer.update('host: ' + options.headers.host + '\n');
   signer.update('date: ' + options.headers.Date + '\n');
   signer.update('content-type: ' + options.headers['content-type'] + '\n');
-  signer.update('content-md5: ' + options.headers['content-md5'] + '\n');
+  signer.update('digest: ' + options.headers['digest'] + '\n');
   signer.update('content-length: ' + options.headers['content-length']);
   options.headers.Authorization =
     'Signature keyId="Test",algorithm="rsa-sha256",headers=' +
-    '"request-line host date content-type content-md5 content-length"' +
+    '"request-line host date content-type digest content-length"' +
     ',signature="' + signer.sign(rsaPrivate, 'base64') + '"';
 
   var req = http.request(options, function(res) {
     t.equal(res.statusCode, 200);
     t.end();
   });
-  req.write('{"hello": "world"}');
+  req.write(jsonMessage);
+  req.end();
+});
+
+test('valid rsa from spec all headers (request-target)', function(t) {
+  var jsonMessage = '{"hello": "world"}';
+  var sha256sum = crypto.createHash('sha256');
+  sha256sum.update(jsonMessage);
+
+  server.tester = function(req, res) {
+    var parsed = httpSignature.parseRequest(req, {
+      // this test uses a fixed old date so ignore clock skew
+      clockSkew: Number.MAX_VALUE
+    });
+    t.ok(httpSignature.verify(parsed, rsaPublic));
+    // check known signature
+    t.ok(req.headers.authorization === 'Signature keyId="Test",algorithm="rsa-sha256",headers="(request-target) host date content-type digest content-length",signature="Tqfe2TGMEOwrHLItN2pDnKZiV3cKDWx1dTreYvWRH/kYVT0avw975g25I0/Sig2l60CDkRKTk9ciJMkn8Eanpa7aICnRWbOu38+ozMfQrM7cc06NRSY6+UQ67dn6K4jEW0WNWxhLLwWBSXxhxuXOL3rFKYZliNCundM9FiYk5aE="');
+
+    res.writeHead(200);
+    res.write(JSON.stringify(parsed, null, 2));
+    res.end();
+  };
+
+
+
+  options.method = 'POST';
+  options.path = '/foo?param=value&pet=dog';
+  options.headers.host = 'example.com';
+  options.headers.Date = 'Thu, 05 Jan 2014 21:31:40 GMT';
+  options.headers['content-type'] = 'application/json';
+  options.headers['digest'] = 'SHA-256=' + sha256sum.digest('base64');
+  options.headers['content-length'] = '' + (jsonMessage.length - 1);
+  var signer = crypto.createSign('RSA-SHA256');
+
+  signer.update('(request-target): ' + options.method.toLowerCase() + ' ' + options.path + '\n');
+  signer.update('host: ' + options.headers.host + '\n');
+  signer.update('date: ' + options.headers.Date + '\n');
+  signer.update('content-type: ' + options.headers['content-type'] + '\n');
+  signer.update('digest: ' + options.headers['digest'] + '\n');
+  signer.update('content-length: ' + options.headers['content-length']);
+
+  options.headers.Authorization =
+    'Signature keyId="Test",algorithm="rsa-sha256",headers=' +
+    '"(request-target) host date content-type digest content-length"' +
+    ',signature="' + signer.sign(rsaPrivate, 'base64') + '"';
+
+  var req = http.request(options, function(res) {
+    t.equal(res.statusCode, 200);
+    t.end();
+  });
+  req.write(jsonMessage);
   req.end();
 });
 
