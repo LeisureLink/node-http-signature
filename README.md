@@ -67,6 +67,8 @@ Many node modules already rely on HTTP Signature, so this module is installed by
 }
 ```
 
+This module is also published to npm as @leisurelink/http-signature.
+
 ## License
 
 MIT.
